@@ -2,7 +2,9 @@
 //!   1. `discount` is a GraphQL *union* — you read it with inline fragments.
 //!   2. The shape you READ (export) is NOT the shape you WRITE (create). We
 //!      capture the rich read shape here and translate it into the create input
-//!      inside `import`. That translation is the interesting part.
+//!      inside `import`. That translation is the interesting part — and for
+//!      collection-scoped discounts it includes remapping collection *handles*
+//!      to the target store's collection *ids*.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -75,6 +77,14 @@ mutation CreateAutomaticBasic($automaticBasicDiscount: DiscountAutomaticBasicInp
 }
 "#;
 
+/// Resolve a collection HANDLE to a store's collection id. Returns null if the
+/// store has no collection with that handle.
+const COLLECTION_BY_HANDLE: &str = r#"
+query Resolve($handle: String!) {
+  collectionByHandle(handle: $handle) { id }
+}
+"#;
+
 impl Resource for Discount {
     fn name(&self) -> &'static str {
         "discounts"
@@ -101,7 +111,11 @@ impl Resource for Discount {
                       }
                       customerGets {
                         value { __typename ... on DiscountPercentage { percentage } }
-                        items { __typename ... on AllDiscountItems { allItems } }
+                        items {
+                          __typename
+                          ... on AllDiscountItems { allItems }
+                          ... on DiscountCollections { collections(first: 50) { nodes { handle } } }
+                        }
                       }
                     }
                     ... on DiscountAutomaticBasic {
@@ -111,7 +125,11 @@ impl Resource for Discount {
                       endsAt
                       customerGets {
                         value { __typename ... on DiscountPercentage { percentage } }
-                        items { __typename ... on AllDiscountItems { allItems } }
+                        items {
+                          __typename
+                          ... on AllDiscountItems { allItems }
+                          ... on DiscountCollections { collections(first: 50) { nodes { handle } } }
+                        }
                       }
                     }
                     ... on DiscountCodeFreeShipping { title status }
@@ -139,11 +157,17 @@ impl Resource for Discount {
             let title = d.title.as_deref().unwrap_or("(untitled)");
 
             if dry_run {
+                // dry-run never hits the network, so we just describe the source.
                 match percentage_of(d) {
                     Some(p) => {
-                        println!("  would create: {title} [{}] — {}% off", d.typename, p * 100.0)
+                        println!(
+                            "  would create: {title} [{}] — {}% off {}",
+                            d.typename,
+                            p * 100.0,
+                            scope_of(d)
+                        )
                     }
-                    None => println!("  would create: {title} [{}]", d.typename),
+                    None => println!("  would create: {title} [{}] {}", d.typename, scope_of(d)),
                 }
                 continue;
             }
@@ -166,26 +190,72 @@ fn percentage_of(d: &DiscountRecord) -> Option<f64> {
     d.customer_gets.as_ref()?["value"]["percentage"].as_f64()
 }
 
+/// A short human description of what the discount applies to, for dry-run output.
+fn scope_of(d: &DiscountRecord) -> String {
+    let Some(cg) = d.customer_gets.as_ref() else {
+        return String::new();
+    };
+    let items = &cg["items"];
+    match items["__typename"].as_str() {
+        Some("AllDiscountItems") => "on all items".to_string(),
+        Some("DiscountCollections") => {
+            let n = items["collections"]["nodes"].as_array().map_or(0, |a| a.len());
+            format!("on {n} collection(s)")
+        }
+        _ => String::new(),
+    }
+}
+
 /// Translate the READ shape of `customerGets` into the CREATE input shape.
-///   read:  { value: { __typename, percentage }, items: { __typename, allItems } }
-///   write: { value: { percentage },            items: { all: true } }
-fn build_customer_gets(d: &DiscountRecord) -> Result<Value> {
+///   read:  value { __typename, percentage }, items { __typename, allItems | collections { nodes { handle } } }
+///   write: value { percentage },             items { all: true | collections { add: [<target ids>] } }
+///
+/// Collection scoping is the interesting case: the source stores collection
+/// *ids*, which are meaningless in the target store, so we remap each collection
+/// by its stable *handle* against `client` (the TARGET store).
+fn build_customer_gets(client: &ShopifyClient, d: &DiscountRecord) -> Result<Value> {
     let percentage =
         percentage_of(d).context("only percentage-value discounts are supported for now")?;
 
-    let all_items = d
+    let cg = d
         .customer_gets
         .as_ref()
-        .and_then(|cg| cg["items"]["allItems"].as_bool())
-        .unwrap_or(false);
-    if !all_items {
-        bail!("only discounts that apply to *all* items are supported for now");
-    }
+        .context("discount is missing customerGets")?;
+    let items = &cg["items"];
+
+    let items_input = match items["__typename"].as_str() {
+        Some("AllDiscountItems") => serde_json::json!({ "all": true }),
+        Some("DiscountCollections") => {
+            let nodes = items["collections"]["nodes"]
+                .as_array()
+                .context("collection-scoped discount has no collections")?;
+            let mut ids = Vec::new();
+            for node in nodes {
+                let handle = node["handle"]
+                    .as_str()
+                    .context("collection is missing its handle")?;
+                ids.push(resolve_collection_id(client, handle)?);
+            }
+            serde_json::json!({ "collections": { "add": ids } })
+        }
+        other => bail!("unsupported discount item scope: {other:?}"),
+    };
 
     Ok(serde_json::json!({
         "value": { "percentage": percentage },
-        "items": { "all": true },
+        "items": items_input,
     }))
+}
+
+/// Resolve a collection HANDLE to the given store's collection id. Handles are
+/// stable across stores; ids are not — this is the crux of cross-store cloning.
+/// A missing collection (null) is a clear, actionable error.
+fn resolve_collection_id(client: &ShopifyClient, handle: &str) -> Result<String> {
+    let data = client.graphql(COLLECTION_BY_HANDLE, serde_json::json!({ "handle": handle }))?;
+    data["collectionByHandle"]["id"]
+        .as_str()
+        .map(str::to_string)
+        .with_context(|| format!("target store has no collection with handle '{handle}'"))
 }
 
 fn create_automatic_basic(client: &ShopifyClient, d: &DiscountRecord) -> Result<()> {
@@ -193,7 +263,7 @@ fn create_automatic_basic(client: &ShopifyClient, d: &DiscountRecord) -> Result<
         "title": d.title,
         "startsAt": d.starts_at,
         "endsAt": d.ends_at,
-        "customerGets": build_customer_gets(d)?,
+        "customerGets": build_customer_gets(client, d)?,
     });
     let result = client.graphql(
         AUTOMATIC_BASIC_CREATE,
@@ -229,7 +299,7 @@ fn create_code_basic(client: &ShopifyClient, d: &DiscountRecord) -> Result<()> {
         "startsAt": d.starts_at,
         "endsAt": d.ends_at,
         "customerSelection": { "all": true },
-        "customerGets": build_customer_gets(d)?,
+        "customerGets": build_customer_gets(client, d)?,
     });
     let result = client.graphql(
         CODE_BASIC_CREATE,
