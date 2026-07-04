@@ -7,7 +7,7 @@
 //! We use the *blocking* reqwest client: one request at a time, no async/await.
 //! (Blocking reqwest spins up its own runtime internally — you never see it.)
 
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::config::StoreCredential;
