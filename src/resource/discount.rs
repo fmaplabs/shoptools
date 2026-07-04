@@ -77,11 +77,31 @@ mutation CreateAutomaticBasic($automaticBasicDiscount: DiscountAutomaticBasicInp
 }
 "#;
 
-/// Resolve a collection HANDLE to a store's collection id. Returns null if the
-/// store has no collection with that handle.
-const COLLECTION_BY_HANDLE: &str = r#"
-query Resolve($handle: String!) {
-  collectionByHandle(handle: $handle) { id }
+/// Follow-up query to page ONE discount's collections when the inline page in
+/// `export` overflows. Keyed by the discount node id. Both basic discount types
+/// select the same path, so the `extract` closure can navigate it uniformly.
+const DISCOUNT_COLLECTIONS: &str = r#"
+query DiscountCollections($id: ID!, $cursor: String) {
+  discountNode(id: $id) {
+    discount {
+      ... on DiscountCodeBasic {
+        customerGets { items { ... on DiscountCollections {
+          collections(first: 250, after: $cursor) {
+            nodes { handle }
+            pageInfo { hasNextPage endCursor }
+          }
+        } } }
+      }
+      ... on DiscountAutomaticBasic {
+        customerGets { items { ... on DiscountCollections {
+          collections(first: 250, after: $cursor) {
+            nodes { handle }
+            pageInfo { hasNextPage endCursor }
+          }
+        } } }
+      }
+    }
+  }
 }
 "#;
 
@@ -91,7 +111,7 @@ impl Resource for Discount {
     }
 
     fn export(&self, client: &ShopifyClient) -> Result<Value> {
-        let nodes = client.paginate(
+        let mut nodes = client.paginate(
             r#"
             query Discounts($cursor: String) {
               discountNodes(first: 50, after: $cursor) {
@@ -114,7 +134,12 @@ impl Resource for Discount {
                         items {
                           __typename
                           ... on AllDiscountItems { allItems }
-                          ... on DiscountCollections { collections(first: 50) { nodes { handle } } }
+                          ... on DiscountCollections {
+                            collections(first: 250) {
+                              nodes { handle }
+                              pageInfo { hasNextPage endCursor }
+                            }
+                          }
                         }
                       }
                     }
@@ -128,7 +153,12 @@ impl Resource for Discount {
                         items {
                           __typename
                           ... on AllDiscountItems { allItems }
-                          ... on DiscountCollections { collections(first: 50) { nodes { handle } } }
+                          ... on DiscountCollections {
+                            collections(first: 250) {
+                              nodes { handle }
+                              pageInfo { hasNextPage endCursor }
+                            }
+                          }
                         }
                       }
                     }
@@ -143,6 +173,28 @@ impl Resource for Discount {
             serde_json::json!({}),
             "discountNodes",
         )?;
+
+        // Nested paging: if a discount's collections list was truncated at the
+        // inline page limit, refetch the full list by discount id.
+        for node in &mut nodes {
+            let items = &node["discount"]["customerGets"]["items"];
+            let truncated = items["__typename"].as_str() == Some("DiscountCollections")
+                && items["collections"]["pageInfo"]["hasNextPage"].as_bool() == Some(true);
+            if !truncated {
+                continue;
+            }
+            let id = node["id"]
+                .as_str()
+                .context("discount node missing id for collection paging")?
+                .to_string();
+            let all = client
+                .paginate_nested(DISCOUNT_COLLECTIONS, serde_json::json!({ "id": id }), |d| {
+                    d["discountNode"]["discount"]["customerGets"]["items"]["collections"].clone()
+                })?;
+            node["discount"]["customerGets"]["items"]["collections"] =
+                serde_json::json!({ "nodes": all });
+        }
+
         Ok(Value::Array(nodes))
     }
 
@@ -235,7 +287,7 @@ fn build_customer_gets(client: &ShopifyClient, d: &DiscountRecord) -> Result<Val
                 let handle = node["handle"]
                     .as_str()
                     .context("collection is missing its handle")?;
-                ids.push(resolve_collection_id(client, handle)?);
+                ids.push(client.resolve_collection(handle)?);
             }
             serde_json::json!({ "collections": { "add": ids } })
         }
@@ -246,17 +298,6 @@ fn build_customer_gets(client: &ShopifyClient, d: &DiscountRecord) -> Result<Val
         "value": { "percentage": percentage },
         "items": items_input,
     }))
-}
-
-/// Resolve a collection HANDLE to the given store's collection id. Handles are
-/// stable across stores; ids are not — this is the crux of cross-store cloning.
-/// A missing collection (null) is a clear, actionable error.
-fn resolve_collection_id(client: &ShopifyClient, handle: &str) -> Result<String> {
-    let data = client.graphql(COLLECTION_BY_HANDLE, serde_json::json!({ "handle": handle }))?;
-    data["collectionByHandle"]["id"]
-        .as_str()
-        .map(str::to_string)
-        .with_context(|| format!("target store has no collection with handle '{handle}'"))
 }
 
 fn create_automatic_basic(client: &ShopifyClient, d: &DiscountRecord) -> Result<()> {

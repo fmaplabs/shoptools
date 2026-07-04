@@ -73,13 +73,30 @@ impl ShopifyClient {
         Ok(value["data"].clone())
     }
 
-    /// Run a paginated connection query, collecting every node across all pages.
+    /// Run a paginated top-level connection query, collecting every node.
     ///
     /// `query` must accept a `$cursor: String` variable, pass it as
     /// `after: $cursor`, and select `pageInfo { hasNextPage endCursor }` next to
     /// `nodes`. `connection` names the top-level connection field in the
     /// response, e.g. "products" or "metaobjectDefinitions".
     pub fn paginate(&self, query: &str, variables: Value, connection: &str) -> Result<Vec<Value>> {
+        // A top-level connection is just a nested one whose path is a single
+        // field, so reuse the general helper.
+        let field = connection.to_string();
+        self.paginate_nested(query, variables, move |data| data[field.as_str()].clone())
+    }
+
+    /// Run a paginated query for a connection at ANY depth, collecting every
+    /// node. `extract` locates the connection object inside the response `data`
+    /// (e.g. `|d| d["discountNode"]["discount"]...["collections"].clone()`). The
+    /// query must accept `$cursor: String` and select
+    /// `pageInfo { hasNextPage endCursor }` next to `nodes`.
+    pub fn paginate_nested(
+        &self,
+        query: &str,
+        variables: Value,
+        extract: impl Fn(&Value) -> Value,
+    ) -> Result<Vec<Value>> {
         let mut all: Vec<Value> = Vec::new();
         let mut cursor: Option<String> = None;
 
@@ -90,7 +107,7 @@ impl ShopifyClient {
             vars["cursor"] = serde_json::json!(cursor);
 
             let data = self.graphql(query, vars)?;
-            let conn = &data[connection];
+            let conn = extract(&data);
 
             if let Some(nodes) = conn["nodes"].as_array() {
                 all.extend(nodes.iter().cloned());
@@ -107,5 +124,41 @@ impl ShopifyClient {
         }
 
         Ok(all)
+    }
+
+    /// Resolve a product HANDLE to this store's product id (null → error).
+    pub fn resolve_product(&self, handle: &str) -> Result<String> {
+        let data = self.graphql(
+            "query($identifier: ProductIdentifierInput!) { productByIdentifier(identifier: $identifier) { id } }",
+            serde_json::json!({ "identifier": { "handle": handle } }),
+        )?;
+        data["productByIdentifier"]["id"]
+            .as_str()
+            .map(str::to_string)
+            .with_context(|| format!("target store has no product with handle '{handle}'"))
+    }
+
+    /// Resolve a collection HANDLE to this store's collection id (null → error).
+    pub fn resolve_collection(&self, handle: &str) -> Result<String> {
+        let data = self.graphql(
+            "query($handle: String!) { collectionByHandle(handle: $handle) { id } }",
+            serde_json::json!({ "handle": handle }),
+        )?;
+        data["collectionByHandle"]["id"]
+            .as_str()
+            .map(str::to_string)
+            .with_context(|| format!("target store has no collection with handle '{handle}'"))
+    }
+
+    /// Resolve a metaobject TYPE+HANDLE to this store's metaobject id (null → error).
+    pub fn resolve_metaobject(&self, type_name: &str, handle: &str) -> Result<String> {
+        let data = self.graphql(
+            "query($handle: MetaobjectHandleInput!) { metaobjectByHandle(handle: $handle) { id } }",
+            serde_json::json!({ "handle": { "type": type_name, "handle": handle } }),
+        )?;
+        data["metaobjectByHandle"]["id"]
+            .as_str()
+            .map(str::to_string)
+            .with_context(|| format!("target store has no metaobject '{type_name}/{handle}'"))
     }
 }
