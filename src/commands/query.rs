@@ -17,12 +17,12 @@ pub fn run(query: &str, store: Option<&str>, json: bool) -> Result<()> {
     // 3. Send the query with no variables.
     let data = client.graphql(query, serde_json::json!({}))?;
 
-    // TODO(you): print `data`.
-    //   - if `json` is true, print pretty JSON:
-    //       println!("{}", serde_json::to_string_pretty(&data)?);
-    //   - otherwise a compact human view is fine to start:
-    //       println!("{data:#}");
-    //   Then return Ok(()).
-    let _ = (json, &data);
-    todo!("print the query result")
+    if json {
+        println!("{data}");
+    } else {
+        // # is used for pretty printing the JSON output.
+        // standard rust convention, not specific to serde
+        println!("{data:#}");
+    }
+    Ok(())
 }

@@ -3,10 +3,12 @@
 //! This file is intentionally tiny. All of shopli's real logic lives in the
 //! *library* crate (`src/lib.rs`) so it can be unit-tested. `main` just runs the
 //! app and turns any error into a friendly message plus a non-zero exit code.
-
+use dotenvy::dotenv;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    dotenv().ok();
+
     // `shopli::run()` returns `anyhow::Result<()>`. We handle the two cases
     // ourselves so we control exactly how errors are printed.
     match shopli::run() {

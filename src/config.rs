@@ -67,8 +67,7 @@ impl Config {
     /// Save to a specific path.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
         let text = toml::to_string_pretty(self).context("serializing config")?;
         fs::write(path, text).with_context(|| format!("writing {}", path.display()))
@@ -110,9 +109,7 @@ pub fn config_path() -> Result<PathBuf> {
 ///
 /// (A future `--token` flag would slot in above these.)
 pub fn resolve(store_name: Option<&str>) -> Result<StoreCredential> {
-    if let (Ok(token), Ok(shop)) =
-        (std::env::var("SHOPLI_TOKEN"), std::env::var("SHOPLI_SHOP"))
-    {
+    if let (Ok(token), Ok(shop)) = (std::env::var("SHOPLI_TOKEN"), std::env::var("SHOPLI_SHOP")) {
         return Ok(StoreCredential { shop, token });
     }
     Config::load()?.get(store_name).cloned()
@@ -126,18 +123,30 @@ mod tests {
         let mut stores = BTreeMap::new();
         stores.insert(
             "dev".to_string(),
-            StoreCredential { shop: "dev.myshopify.com".into(), token: "shpat_dev".into() },
+            StoreCredential {
+                shop: "dev.myshopify.com".into(),
+                token: "shpat_dev".into(),
+            },
         );
         stores.insert(
             "prod".to_string(),
-            StoreCredential { shop: "prod.myshopify.com".into(), token: "shpat_prod".into() },
+            StoreCredential {
+                shop: "prod.myshopify.com".into(),
+                token: "shpat_prod".into(),
+            },
         );
-        Config { default: Some("dev".to_string()), stores }
+        Config {
+            default: Some("dev".to_string()),
+            stores,
+        }
     }
 
     #[test]
     fn get_named_store() {
-        assert_eq!(sample().get(Some("prod")).unwrap().shop, "prod.myshopify.com");
+        assert_eq!(
+            sample().get(Some("prod")).unwrap().shop,
+            "prod.myshopify.com"
+        );
     }
 
     #[test]
