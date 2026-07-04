@@ -27,20 +27,22 @@ pub fn run(from: &str, to: &str, only: &[String], dry_run: bool) -> Result<()> {
     let resources = if only.is_empty() {
         resource::all()
     } else {
-        only.iter().map(|n| resource::by_name(n)).collect::<Result<Vec<_>>>()?
+        only.iter()
+            .map(|n| resource::by_name(n))
+            .collect::<Result<Vec<_>>>()?
     };
 
     // TODO(you): copy each resource from source to target.
     //
-    //   for res in &resources {
-    //       let data = res.export(&from_client)?;
-    //       res.import(&to_client, &data, dry_run)?;
-    //       println!("cloned {}", res.name());
-    //   }
-    //   Ok(())
+    for res in &resources {
+        let data = res.export(&from_client)?;
+        res.import(&to_client, &data, dry_run)?;
+        println!("cloned {}", res.name());
+    }
+    Ok(())
     //
     // ⚠ Order matters (see `resource::all`): metaobject/metafield *definitions*
     //   must exist in the target before values that reference them.
-    let _ = (&from_client, &to_client, &resources, dry_run);
-    todo!("export from the source store and import into the target store")
+    // let _ = (&from_client, &to_client, &resources, dry_run);
+    // todo!("export from the source store and import into the target store")
 }

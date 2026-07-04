@@ -14,7 +14,7 @@ use crate::config::StoreCredential;
 
 /// The Admin API version to target. Shopify versions the API by calendar
 /// quarter; bump this as needed. https://shopify.dev/docs/api/usage/versioning
-pub const API_VERSION: &str = "2025-07";
+pub const API_VERSION: &str = "2026-07";
 
 /// A client bound to one store. `token` and `http` are unused until you fill in
 /// the methods below — hence the temporary `allow(dead_code)`; delete it once

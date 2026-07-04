@@ -2,7 +2,7 @@
 //! `export` works you can `shopli export products` end-to-end.
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::Resource;
@@ -18,12 +18,24 @@ pub struct Product;
 /// DTO that gives us dot-notation (`record.title`) instead of the dynamic
 /// `value["title"].as_str()` dance. Fields we don't list here (e.g. the source
 /// `id`) are simply ignored by serde during deserialization.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct ProductRecord {
     title: String,
     handle: String,
     status: String,
 }
+
+/// The productCreate mutation. Takes a `ProductCreateInput` and returns the new
+/// product plus any business-validation `userErrors`. Shape verified against the
+/// official Shopify Admin `2026-07` docs.
+const PRODUCT_CREATE: &str = r#"
+mutation CreateProduct($product: ProductCreateInput!) {
+  productCreate(product: $product) {
+    product { id title handle status }
+    userErrors { field message }
+  }
+}
+"#;
 
 impl Resource for Product {
     fn name(&self) -> &'static str {
@@ -61,10 +73,35 @@ impl Resource for Product {
                 continue;
             }
 
-            // TODO(you): send a productCreate mutation for `product` via
-            // client.graphql(...). Get --dry-run right first, then wire this up.
-            let _ = client;
-            todo!("call productCreate for {}", product.title);
+            // Serialize the typed record into the mutation input. Because
+            // ProductRecord derives Serialize (the mirror of Deserialize), the
+            // same struct that parsed the file becomes the GraphQL input —
+            // title/handle/status map straight onto ProductCreateInput.
+            let variables = serde_json::json!({
+                "product": serde_json::to_value(product).context("serializing product input")?,
+            });
+
+            let result = client.graphql(PRODUCT_CREATE, variables)?;
+
+            // Mutations have TWO error channels. `client.graphql` already bailed on
+            // a top-level `errors` array (bad query / auth / throttle). Business-rule
+            // failures — e.g. a handle already in use — arrive in `userErrors`.
+            let payload = &result["productCreate"];
+            if let Some(errors) = payload["userErrors"].as_array() {
+                if !errors.is_empty() {
+                    anyhow::bail!(
+                        "could not create '{}': {}",
+                        product.handle, payload["userErrors"]
+                    );
+                }
+            }
+
+            let created = &payload["product"];
+            println!(
+                "  created {} ({})",
+                created["title"].as_str().unwrap_or("?"),
+                created["id"].as_str().unwrap_or("?"),
+            );
         }
         Ok(())
     }
