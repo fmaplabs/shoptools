@@ -91,10 +91,10 @@ impl Resource for Discount {
     }
 
     fn export(&self, client: &ShopifyClient) -> Result<Value> {
-        let data = client.graphql(
+        let nodes = client.paginate(
             r#"
-            query {
-              discountNodes(first: 50) {
+            query Discounts($cursor: String) {
+              discountNodes(first: 50, after: $cursor) {
                 nodes {
                   id
                   discount {
@@ -136,13 +136,14 @@ impl Resource for Discount {
                     ... on DiscountAutomaticFreeShipping { title status }
                   }
                 }
+                pageInfo { hasNextPage endCursor }
               }
             }
             "#,
             serde_json::json!({}),
+            "discountNodes",
         )?;
-        // export's ONLY job: read and return the JSON array. No deserialize here.
-        Ok(data["discountNodes"]["nodes"].clone())
+        Ok(Value::Array(nodes))
     }
 
     fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()> {

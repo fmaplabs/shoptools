@@ -72,4 +72,40 @@ impl ShopifyClient {
 
         Ok(value["data"].clone())
     }
+
+    /// Run a paginated connection query, collecting every node across all pages.
+    ///
+    /// `query` must accept a `$cursor: String` variable, pass it as
+    /// `after: $cursor`, and select `pageInfo { hasNextPage endCursor }` next to
+    /// `nodes`. `connection` names the top-level connection field in the
+    /// response, e.g. "products" or "metaobjectDefinitions".
+    pub fn paginate(&self, query: &str, variables: Value, connection: &str) -> Result<Vec<Value>> {
+        let mut all: Vec<Value> = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            // Start each request where the previous page ended. On the first
+            // pass `cursor` is None, which serializes to `null` = "from the start".
+            let mut vars = variables.clone();
+            vars["cursor"] = serde_json::json!(cursor);
+
+            let data = self.graphql(query, vars)?;
+            let conn = &data[connection];
+
+            if let Some(nodes) = conn["nodes"].as_array() {
+                all.extend(nodes.iter().cloned());
+            }
+
+            // Advance only if there IS a next page and a cursor to advance to;
+            // otherwise stop. Requiring both guards against ever looping forever.
+            let page = &conn["pageInfo"];
+            let has_next = page["hasNextPage"].as_bool().unwrap_or(false);
+            match page["endCursor"].as_str() {
+                Some(end) if has_next => cursor = Some(end.to_string()),
+                _ => break,
+            }
+        }
+
+        Ok(all)
+    }
 }

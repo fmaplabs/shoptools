@@ -43,11 +43,19 @@ impl Resource for Product {
     }
 
     fn export(&self, client: &ShopifyClient) -> Result<Value> {
-        let data = client.graphql(
-            "query { products(first: 50) { nodes { id title handle status } } }",
+        let nodes = client.paginate(
+            r#"
+            query Products($cursor: String) {
+              products(first: 50, after: $cursor) {
+                nodes { id title handle status }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+            "#,
             serde_json::json!({}),
+            "products",
         )?;
-        Ok(data["products"]["nodes"].clone())
+        Ok(Value::Array(nodes))
     }
 
     fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()> {

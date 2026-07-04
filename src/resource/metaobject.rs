@@ -74,24 +74,26 @@ struct FieldValue {
 // ---- GraphQL -----------------------------------------------------------------
 
 const DEFINITIONS_QUERY: &str = r#"
-query {
-  metaobjectDefinitions(first: 50) {
+query Definitions($cursor: String) {
+  metaobjectDefinitions(first: 50, after: $cursor) {
     nodes {
       name
       type
       fieldDefinitions { key name type { name } }
     }
+    pageInfo { hasNextPage endCursor }
   }
 }
 "#;
 
 const OBJECTS_QUERY: &str = r#"
-query Objects($type: String!) {
-  metaobjects(type: $type, first: 50) {
+query Objects($type: String!, $cursor: String) {
+  metaobjects(type: $type, first: 50, after: $cursor) {
     nodes {
       handle
       fields { key value }
     }
+    pageInfo { hasNextPage endCursor }
   }
 }
 "#;
@@ -120,35 +122,28 @@ impl Resource for Metaobject {
     }
 
     fn export(&self, client: &ShopifyClient) -> Result<Value> {
-        // Phase 1: the definitions (the schema).
-        let def_data = client.graphql(DEFINITIONS_QUERY, json!({}))?;
-        let definitions = def_data["metaobjectDefinitions"]["nodes"].clone();
+        // Phase 1: the definitions (the schema), across all pages.
+        let definitions = client.paginate(DEFINITIONS_QUERY, json!({}), "metaobjectDefinitions")?;
 
         // Phase 2: for each definition's type, fetch its entries. `metaobjects`
-        // needs a `type` argument, so we query once per type and accumulate.
+        // needs a `type` argument, so we paginate once per type and accumulate.
         let mut objects: Vec<Value> = Vec::new();
-        if let Some(defs) = definitions.as_array() {
-            for def in defs {
-                let type_name = def["type"]
-                    .as_str()
-                    .context("metaobject definition is missing its type")?;
+        for def in &definitions {
+            let type_name = def["type"]
+                .as_str()
+                .context("metaobject definition is missing its type")?;
 
-                let obj_data =
-                    client.graphql(OBJECTS_QUERY, json!({ "type": type_name }))?;
-
-                if let Some(nodes) = obj_data["metaobjects"]["nodes"].as_array() {
-                    for node in nodes {
-                        // The query doesn't echo the type back, so stamp it on
-                        // each entry — import needs it to pick the definition.
-                        let mut obj = node.clone();
-                        obj["type"] = json!(type_name);
-                        objects.push(obj);
-                    }
-                }
+            let entries =
+                client.paginate(OBJECTS_QUERY, json!({ "type": type_name }), "metaobjects")?;
+            for mut obj in entries {
+                // The query doesn't echo the type back, so stamp it on each
+                // entry — import needs it to pick the definition.
+                obj["type"] = json!(type_name);
+                objects.push(obj);
             }
         }
 
-        Ok(json!({ "definitions": definitions, "objects": objects }))
+        Ok(json!({ "definitions": Value::Array(definitions), "objects": objects }))
     }
 
     fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()> {
