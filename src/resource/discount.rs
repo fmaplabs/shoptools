@@ -15,9 +15,11 @@ impl Resource for Discount {
     }
 
     fn export(&self, client: &ShopifyClient) -> Result<Value> {
-        // TODO(you): query discounts and return them as a JSON array.
-        let _ = client;
-        todo!("export discounts")
+        let data = client.graphql(
+            "query { discountNodes(first: 50){nodes {id}}}",
+            serde_json::json!({}),
+        )?;
+        Ok(data["discounts"]["nodes"].clone())
     }
 
     fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()> {
