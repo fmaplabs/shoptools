@@ -19,11 +19,12 @@ pub fn run(command: StoreCommand) -> Result<()> {
 }
 
 fn add(name: String, shop: String, token: Option<String>) -> Result<()> {
-    // Prefer an explicit --token, but fall back to shoptools_TOKEN so you aren't
-    // forced to paste a secret on the command line (it would land in shell history).
-    let token = match token.or_else(|| std::env::var("shoptools_TOKEN").ok()) {
+    // The credential env vars are role-scoped (SHOPIFY_SOURCE_* / SHOPIFY_TARGET_*)
+    // and describe a data flow, not a named config entry — so there's no generic
+    // token fallback here; `add` requires an explicit --token.
+    let token = match token {
         Some(t) => t,
-        None => bail!("no token given; pass --token or set shoptools_TOKEN"),
+        None => bail!("no token given; pass --token"),
     };
 
     let mut config = Config::load()?;

@@ -94,7 +94,7 @@ pub enum StoreCommand {
         /// The myshopify.com domain, e.g. acme-dev.myshopify.com
         #[arg(short, long)]
         shop: String,
-        /// The offline Admin API access token (or set shoptools_TOKEN)
+        /// The offline Admin API access token
         #[arg(short, long)]
         token: Option<String>,
     },

@@ -8,12 +8,13 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::client::ShopifyClient;
-use crate::config;
+use crate::config::{self, Role};
 use crate::resource;
 
 pub fn run(resource_name: &str, file: &Path, store: Option<&str>, dry_run: bool) -> Result<()> {
     let res = resource::by_name(resource_name)?;
-    let cred = config::resolve(store)?;
+    // Import writes *into* a store: target credentials.
+    let cred = config::resolve(store, Role::Target)?;
     let client = ShopifyClient::new(cred)?;
 
     let text =

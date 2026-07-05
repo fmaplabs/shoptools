@@ -7,12 +7,13 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use crate::client::ShopifyClient;
-use crate::config;
+use crate::config::{self, Role};
 use crate::resource;
 
 pub fn run(resource_name: &str, store: Option<&str>, out: Option<PathBuf>) -> Result<()> {
     let res = resource::by_name(resource_name)?;
-    let cred = config::resolve(store)?;
+    // Export reads *from* a store: source credentials.
+    let cred = config::resolve(store, Role::Source)?;
     let client = ShopifyClient::new(cred)?;
 
     // Calls into resource/<type>.rs — implement `export` there.

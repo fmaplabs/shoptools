@@ -7,11 +7,12 @@
 use anyhow::Result;
 
 use crate::client::ShopifyClient;
-use crate::config;
+use crate::config::{self, Role};
 
 pub fn run(query: &str, store: Option<&str>, json: bool) -> Result<()> {
-    // 1. Which store? Resolve credentials (env vars or config file).
-    let cred = config::resolve(store)?;
+    // 1. Which store? Resolve credentials (env vars or config file). A query
+    //    reads from a store, so it uses the source credentials.
+    let cred = config::resolve(store, Role::Source)?;
     // 2. Build a client for it.
     let client = ShopifyClient::new(cred)?;
     // 3. Send the query with no variables.

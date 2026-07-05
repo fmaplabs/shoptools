@@ -30,7 +30,11 @@ working reference modules plus guided stubs to implement.
   treats the token as an opaque string; it does not care which path produced it.
 - **Credential resolution chain** (first found wins), mirroring `aws`/`gh`/`docker`:
   1. `--token` flag
-  2. `shoptools_TOKEN` environment variable (+ `shoptools_SHOP` for the domain)
+  2. role-scoped environment variables, explicit about which side of the data
+     flow they belong to: `SHOPIFY_SOURCE_SHOP` + `SHOPIFY_SOURCE_TOKEN` for
+     commands that read from a store (`query`, `export`), and
+     `SHOPIFY_TARGET_SHOP` + `SHOPIFY_TARGET_TOKEN` for commands that write
+     into one (`import`); both variables of a pair must be set
   3. stored config file entry (selected by `--store <name>` or the default store)
 
 ## Architecture

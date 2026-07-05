@@ -91,27 +91,49 @@ impl Config {
     }
 }
 
-/// The path to the config file. Honors `$shoptools_CONFIG` so you (and the tests)
+/// The path to the config file. Honors `$SHOPTOOLS_CONFIG` so you (and the tests)
 /// can override it; otherwise it's `<os config dir>/shoptools/config.toml`
 /// (e.g. `~/.config/shoptools/config.toml` on Linux).
 pub fn config_path() -> Result<PathBuf> {
-    if let Ok(custom) = std::env::var("shoptools_CONFIG") {
+    if let Ok(custom) = std::env::var("SHOPTOOLS_CONFIG") {
         return Ok(PathBuf::from(custom));
     }
     let dir = dirs::config_dir().context("could not determine an OS config directory")?;
     Ok(dir.join("shoptools").join("config.toml"))
 }
 
+/// Which side of a data flow a command's store sits on. Commands that read
+/// from a store (`query`, `export`) resolve `Source` credentials; commands
+/// that write into one (`import`) resolve `Target` credentials. This makes
+/// every call site say which store it means — you can keep both stores'
+/// credentials in the environment at once without ambiguity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Source,
+    Target,
+}
+
+impl Role {
+    /// The `(shop, token)` environment variable names for this role.
+    pub fn env_vars(self) -> (&'static str, &'static str) {
+        match self {
+            Role::Source => ("SHOPIFY_SOURCE_SHOP", "SHOPIFY_SOURCE_TOKEN"),
+            Role::Target => ("SHOPIFY_TARGET_SHOP", "SHOPIFY_TARGET_TOKEN"),
+        }
+    }
+}
+
 /// Resolve the credentials to use for a network command, in priority order:
-///   1. `shoptools_TOKEN` + `shoptools_SHOP` environment variables
+///   1. the role's environment variables — `SHOPIFY_SOURCE_SHOP` +
+///      `SHOPIFY_SOURCE_TOKEN` for source commands, `SHOPIFY_TARGET_SHOP` +
+///      `SHOPIFY_TARGET_TOKEN` for target commands. Both of the pair must be
+///      set; a lone shop or token falls through to the config file.
 ///   2. the named store (or default store) from the config file
 ///
 /// (A future `--token` flag would slot in above these.)
-pub fn resolve(store_name: Option<&str>) -> Result<StoreCredential> {
-    if let (Ok(token), Ok(shop)) = (
-        std::env::var("shoptools_TOKEN"),
-        std::env::var("shoptools_SHOP"),
-    ) {
+pub fn resolve(store_name: Option<&str>, role: Role) -> Result<StoreCredential> {
+    let (shop_var, token_var) = role.env_vars();
+    if let (Ok(shop), Ok(token)) = (std::env::var(shop_var), std::env::var(token_var)) {
         return Ok(StoreCredential { shop, token });
     }
     Config::load()?.get(store_name).cloned()
@@ -164,6 +186,18 @@ mod tests {
     #[test]
     fn get_with_no_default_is_error() {
         assert!(Config::default().get(None).is_err());
+    }
+
+    #[test]
+    fn role_env_var_names_are_explicit_about_source_and_target() {
+        assert_eq!(
+            Role::Source.env_vars(),
+            ("SHOPIFY_SOURCE_SHOP", "SHOPIFY_SOURCE_TOKEN")
+        );
+        assert_eq!(
+            Role::Target.env_vars(),
+            ("SHOPIFY_TARGET_SHOP", "SHOPIFY_TARGET_TOKEN")
+        );
     }
 
     #[test]

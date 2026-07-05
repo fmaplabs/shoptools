@@ -4,7 +4,7 @@
 //! operate on any of them without knowing the specifics. Adding a new resource
 //! type is a new file that implements this trait — no edits to the commands.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde_json::Value;
 
 use crate::client::ShopifyClient;
