@@ -81,35 +81,37 @@ impl Config {
     pub fn get(&self, name: Option<&str>) -> Result<&StoreCredential> {
         let name = match name {
             Some(n) => n,
-            None => self
-                .default
-                .as_deref()
-                .context("no store specified and no default set; run `shopli store use <name>`")?,
+            None => self.default.as_deref().context(
+                "no store specified and no default set; run `shoptools store use <name>`",
+            )?,
         };
         self.stores.get(name).with_context(|| {
-            format!("no store named '{name}'; run `shopli store list` to see configured stores")
+            format!("no store named '{name}'; run `shoptools store list` to see configured stores")
         })
     }
 }
 
-/// The path to the config file. Honors `$SHOPLI_CONFIG` so you (and the tests)
-/// can override it; otherwise it's `<os config dir>/shopli/config.toml`
-/// (e.g. `~/.config/shopli/config.toml` on Linux).
+/// The path to the config file. Honors `$shoptools_CONFIG` so you (and the tests)
+/// can override it; otherwise it's `<os config dir>/shoptools/config.toml`
+/// (e.g. `~/.config/shoptools/config.toml` on Linux).
 pub fn config_path() -> Result<PathBuf> {
-    if let Ok(custom) = std::env::var("SHOPLI_CONFIG") {
+    if let Ok(custom) = std::env::var("shoptools_CONFIG") {
         return Ok(PathBuf::from(custom));
     }
     let dir = dirs::config_dir().context("could not determine an OS config directory")?;
-    Ok(dir.join("shopli").join("config.toml"))
+    Ok(dir.join("shoptools").join("config.toml"))
 }
 
 /// Resolve the credentials to use for a network command, in priority order:
-///   1. `SHOPLI_TOKEN` + `SHOPLI_SHOP` environment variables
+///   1. `shoptools_TOKEN` + `shoptools_SHOP` environment variables
 ///   2. the named store (or default store) from the config file
 ///
 /// (A future `--token` flag would slot in above these.)
 pub fn resolve(store_name: Option<&str>) -> Result<StoreCredential> {
-    if let (Ok(token), Ok(shop)) = (std::env::var("SHOPLI_TOKEN"), std::env::var("SHOPLI_SHOP")) {
+    if let (Ok(token), Ok(shop)) = (
+        std::env::var("shoptools_TOKEN"),
+        std::env::var("shoptools_SHOP"),
+    ) {
         return Ok(StoreCredential { shop, token });
     }
     Config::load()?.get(store_name).cloned()

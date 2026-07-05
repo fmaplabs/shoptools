@@ -1,7 +1,7 @@
 //! The Shopify Admin GraphQL client. ⭐ YOUR FIRST TASK ⭐
 //!
 //! Implement `ShopifyClient::new` and `ShopifyClient::graphql`. When they work,
-//! `shopli query '{ shop { name } }'` will make a real Admin API call. Use
+//! `shoptools query '{ shop { name } }'` will make a real Admin API call. Use
 //! `config.rs` as your style reference (Result, `?`, `.context(...)`).
 //!
 //! We use the *blocking* reqwest client: one request at a time, no async/await.
@@ -29,7 +29,7 @@ impl ShopifyClient {
     /// Build a client from resolved credentials.
     pub fn new(cred: StoreCredential) -> Result<ShopifyClient> {
         let http = reqwest::blocking::Client::builder()
-            .user_agent("shopli/0.1")
+            .user_agent("shoptools/0.1")
             .build()
             .context("building HTTP client")?; // needs `use anyhow::Context;`
 

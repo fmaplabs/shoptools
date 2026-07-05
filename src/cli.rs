@@ -11,7 +11,11 @@ use clap::{Parser, Subcommand};
 /// Top-level parser. `Cli::parse()` reads `std::env::args()` and fills this in,
 /// or prints help/errors and exits.
 #[derive(Parser)]
-#[command(name = "shopli", version, about = "A personal CLI for Shopify store development")]
+#[command(
+    name = "shoptools",
+    version,
+    about = "A personal CLI for Shopify store development"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -53,7 +57,7 @@ pub enum Command {
     Import {
         /// Resource type: products, discounts, or metaobjects
         resource: String,
-        /// The JSON file produced by `shopli export`
+        /// The JSON file produced by `shoptools export`
         #[arg(short, long)]
         file: PathBuf,
         #[arg(short, long)]
@@ -80,7 +84,7 @@ pub enum Command {
     },
 }
 
-/// Sub-verbs under `shopli store …`.
+/// Sub-verbs under `shoptools store …`.
 #[derive(Subcommand)]
 pub enum StoreCommand {
     /// Add or update a store credential
@@ -90,7 +94,7 @@ pub enum StoreCommand {
         /// The myshopify.com domain, e.g. acme-dev.myshopify.com
         #[arg(short, long)]
         shop: String,
-        /// The offline Admin API access token (or set SHOPLI_TOKEN)
+        /// The offline Admin API access token (or set shoptools_TOKEN)
         #[arg(short, long)]
         token: Option<String>,
     },

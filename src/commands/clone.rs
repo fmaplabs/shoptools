@@ -1,4 +1,4 @@
-//! `shopli clone --from A --to B` — the headline feature: export each resource
+//! `shoptools clone --from A --to B` — the headline feature: export each resource
 //! from store A and import it into store B.
 //!
 //! The credential/resource setup is done. The loop body — export from source,

@@ -1,5 +1,5 @@
 //! Products. Implement this resource FIRST — it's the most familiar, and once
-//! `export` works you can `shopli export products` end-to-end.
+//! `export` works you can `shoptools export products` end-to-end.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -99,7 +99,8 @@ impl Resource for Product {
                 if !errors.is_empty() {
                     anyhow::bail!(
                         "could not create '{}': {}",
-                        product.handle, payload["userErrors"]
+                        product.handle,
+                        payload["userErrors"]
                     );
                 }
             }

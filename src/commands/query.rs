@@ -1,4 +1,4 @@
-//! `shopli query <graphql>` — run a raw Admin GraphQL query.
+//! `shoptools query <graphql>` — run a raw Admin GraphQL query.
 //!
 //! This handler is already wired to `config::resolve` and the client. Once you
 //! implement `client.rs`, it will run up to the point where it prints — and

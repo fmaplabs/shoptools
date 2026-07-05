@@ -1,4 +1,4 @@
-//! shopli — a personal CLI for Shopify store development.
+//! shoptools — a personal CLI for Shopify store development.
 //!
 //! This is the **crate root** of the library. The `mod` lines below tell the
 //! compiler which modules exist and where to find them:
@@ -34,14 +34,22 @@ pub fn run() -> Result<()> {
         Command::Query { query, store, json } => {
             commands::query::run(&query, store.as_deref(), json)
         }
-        Command::Export { resource, store, out } => {
-            commands::export::run(&resource, store.as_deref(), out)
-        }
-        Command::Import { resource, file, store, dry_run } => {
-            commands::import::run(&resource, &file, store.as_deref(), dry_run)
-        }
-        Command::Clone { from, to, only, dry_run } => {
-            commands::clone::run(&from, &to, &only, dry_run)
-        }
+        Command::Export {
+            resource,
+            store,
+            out,
+        } => commands::export::run(&resource, store.as_deref(), out),
+        Command::Import {
+            resource,
+            file,
+            store,
+            dry_run,
+        } => commands::import::run(&resource, &file, store.as_deref(), dry_run),
+        Command::Clone {
+            from,
+            to,
+            only,
+            dry_run,
+        } => commands::clone::run(&from, &to, &only, dry_run),
     }
 }

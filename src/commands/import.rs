@@ -1,4 +1,4 @@
-//! `shopli import <resource> --file <f>` — push a JSON file into a store.
+//! `shoptools import <resource> --file <f>` — push a JSON file into a store.
 //!
 //! Wiring is done; you implement the read + parse here, and the actual create
 //! logic inside `resource/<type>.rs`. Honor `dry_run` (plan, don't write).

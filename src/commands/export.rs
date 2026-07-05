@@ -1,4 +1,4 @@
-//! `shopli export <resource>` — pull a resource from a store into a JSON file.
+//! `shoptools export <resource>` — pull a resource from a store into a JSON file.
 //!
 //! The wiring (pick resource → resolve store → build client → export) is done;
 //! your job is the file write at the end, plus the actual export logic inside
