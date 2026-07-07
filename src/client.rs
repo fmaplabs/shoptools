@@ -7,6 +7,8 @@
 //! We use the *blocking* reqwest client: one request at a time, no async/await.
 //! (Blocking reqwest spins up its own runtime internally — you never see it.)
 
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use serde_json::Value;
 
@@ -49,28 +51,53 @@ impl ShopifyClient {
         )
     }
 
+    /// How many times `graphql` retries a request Shopify rejected with a
+    /// THROTTLED error before giving up.
+    const MAX_THROTTLE_RETRIES: u32 = 5;
+
     /// POST a GraphQL `query` (with `variables`) and return its `data` object.
+    ///
+    /// The Admin API rate limit is a cost-based leaky bucket. When we drain it,
+    /// Shopify returns an HTTP 200 whose *body* carries a THROTTLED error (not a
+    /// 429), so we detect it after decoding and retry the same request with
+    /// exponential backoff. Every OTHER error still bails immediately.
     pub fn graphql(&self, query: &str, variables: Value) -> Result<Value> {
         let url = self.endpoint();
-
         let body = serde_json::json!({ "query": query, "variables": variables });
-        let resp = self
-            .http
-            .post(&url)
-            .header("X-Shopify-Access-Token", &self.token)
-            .json(&body)
-            .send()
-            .context("sending request to Shopify")?;
 
-        let value: Value = resp.json().context("decoding Shopify response")?;
+        let mut attempt = 0;
+        loop {
+            let resp = self
+                .http
+                .post(&url)
+                .header("X-Shopify-Access-Token", &self.token)
+                .json(&body)
+                .send()
+                .context("sending request to Shopify")?;
 
-        // GraphQL returns HTTP 200 even for query errors, so check the body:
-        if !value["errors"].is_null() {
-            anyhow::bail!("GraphQL errors: {}", value["errors"]);
+            let value: Value = resp.json().context("decoding Shopify response")?;
+
+            // GraphQL returns HTTP 200 even for query errors, so check the body:
+            if !value["errors"].is_null() {
+                if is_throttled(&value["errors"]) && attempt < Self::MAX_THROTTLE_RETRIES {
+                    // Back off 1s, 2s, 4s, 8s, 16s … then retry the same request.
+                    let wait = Duration::from_secs(1u64 << attempt);
+                    eprintln!(
+                        "  throttled by Shopify; retrying in {}s (attempt {}/{})",
+                        wait.as_secs(),
+                        attempt + 1,
+                        Self::MAX_THROTTLE_RETRIES,
+                    );
+                    std::thread::sleep(wait);
+                    attempt += 1;
+                    continue;
+                }
+                anyhow::bail!("GraphQL errors: {}", value["errors"]);
+            }
+
+            // `value` gets thrown away, so clone `data` into owned memory.
+            return Ok(value["data"].clone());
         }
-        // graphql gets thrown away, so we have to clone the return value into our "owned" memory space so that we can use it.
-
-        Ok(value["data"].clone())
     }
 
     /// Run a paginated top-level connection query, collecting every node.
@@ -160,5 +187,82 @@ impl ShopifyClient {
             .as_str()
             .map(str::to_string)
             .with_context(|| format!("target store has no metaobject '{type_name}/{handle}'"))
+    }
+
+    /// Resolve a customer EMAIL to this store's customer id (null → error).
+    /// Email is the stable cross-store key for customers — the analog of a
+    /// product/collection handle.
+    pub fn resolve_customer(&self, email: &str) -> Result<String> {
+        let data = self.graphql(
+            "query($identifier: CustomerIdentifierInput!) { customerByIdentifier(identifier: $identifier) { id } }",
+            serde_json::json!({ "identifier": { "emailAddress": email } }),
+        )?;
+        data["customerByIdentifier"]["id"]
+            .as_str()
+            .map(str::to_string)
+            .with_context(|| format!("target store has no customer with email '{email}'"))
+    }
+
+    /// Resolve a location NAME to this store's location id (null → error).
+    /// Locations are physical store config (a handful at most), so we just page
+    /// through them and match by name rather than adding a lookup query.
+    pub fn resolve_location(&self, name: &str) -> Result<String> {
+        let locations = self.paginate(
+            r#"
+            query Locations($cursor: String) {
+              locations(first: 50, after: $cursor) {
+                nodes { id name }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+            "#,
+            serde_json::json!({}),
+            "locations",
+        )?;
+        locations
+            .iter()
+            .find(|loc| loc["name"].as_str() == Some(name))
+            .and_then(|loc| loc["id"].as_str())
+            .map(str::to_string)
+            .with_context(|| format!("target store has no location named '{name}'"))
+    }
+}
+
+/// True if any of the top-level GraphQL `errors` is Shopify's cost-based throttle
+/// signal (`extensions.code == "THROTTLED"`). A free function (not a method) so
+/// it stays pure and unit-testable without a live client.
+fn is_throttled(errors: &Value) -> bool {
+    errors.as_array().is_some_and(|errs| {
+        errs.iter()
+            .any(|e| e["extensions"]["code"].as_str() == Some("THROTTLED"))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_throttled;
+    use serde_json::json;
+
+    #[test]
+    fn detects_throttled_error() {
+        let errors = json!([
+            { "message": "Throttled", "extensions": { "code": "THROTTLED" } }
+        ]);
+        assert!(is_throttled(&errors));
+    }
+
+    #[test]
+    fn ignores_non_throttle_errors() {
+        let errors = json!([
+            { "message": "Field 'foo' doesn't exist", "extensions": { "code": "undefinedField" } }
+        ]);
+        assert!(!is_throttled(&errors));
+    }
+
+    #[test]
+    fn handles_missing_extensions_and_non_arrays() {
+        assert!(!is_throttled(&json!([{ "message": "boom" }])));
+        assert!(!is_throttled(&json!(null)));
+        assert!(!is_throttled(&json!("not an array")));
     }
 }

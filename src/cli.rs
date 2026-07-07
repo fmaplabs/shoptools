@@ -44,7 +44,8 @@ pub enum Command {
 
     /// Export a resource from a store to a JSON file
     Export {
-        /// Resource type: products, discounts, or metaobjects
+        /// Resource type: products, discounts, metaobjects, customers,
+        /// delivery_profiles, giftcards, store_credit
         resource: String,
         #[arg(short, long)]
         store: Option<String>,
@@ -55,7 +56,8 @@ pub enum Command {
 
     /// Import a resource into a store from a JSON file
     Import {
-        /// Resource type: products, discounts, or metaobjects
+        /// Resource type: products, discounts, metaobjects, customers,
+        /// delivery_profiles, giftcards, store_credit
         resource: String,
         /// The JSON file produced by `shoptools export`
         #[arg(short, long)]

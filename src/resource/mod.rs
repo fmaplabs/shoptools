@@ -33,22 +33,42 @@ pub fn by_name(name: &str) -> Result<Box<dyn Resource>> {
         "products" => Ok(Box::new(product::Product)),
         "discounts" => Ok(Box::new(discount::Discount)),
         "metaobjects" => Ok(Box::new(metaobject::Metaobject)),
-        other => bail!("unknown resource '{other}' (known: products, discounts, metaobjects)"),
+        "customers" => Ok(Box::new(customer::Customer)),
+        "delivery_profiles" => Ok(Box::new(delivery_profile::DeliveryProfile)),
+        "giftcards" => Ok(Box::new(giftcard::GiftCard)),
+        "store_credit" => Ok(Box::new(store_credit::StoreCredit)),
+        other => bail!(
+            "unknown resource '{other}' (known: products, discounts, metaobjects, \
+             customers, delivery_profiles, giftcards, store_credit)"
+        ),
     }
 }
 
 /// Every known resource, in a safe order for cloning (dependencies first).
 pub fn all() -> Vec<Box<dyn Resource>> {
-    // NOTE: order matters for `clone`. Metaobject/metafield *definitions* must
-    // exist before values that reference them; products may reference metafields.
-    // Revisit this ordering as you implement the resources.
+    // NOTE: order matters for `clone`.
+    //   * Metaobject *definitions* must exist before values that reference them.
+    //   * Customers must exist before gift cards / store credit (which reference a
+    //     customer by email) and before orders (deferred).
+    //   * Products come before delivery profiles so a later product-association
+    //     feature has variants to resolve.
+    // Pre-existing gap: discounts resolve *collections* by handle, but collections
+    // aren't cloneable yet — they must already exist in the target.
     vec![
         Box::new(metaobject::Metaobject),
+        Box::new(customer::Customer),
         Box::new(product::Product),
+        Box::new(delivery_profile::DeliveryProfile),
         Box::new(discount::Discount),
+        Box::new(giftcard::GiftCard),
+        Box::new(store_credit::StoreCredit),
     ]
 }
 
+pub mod customer;
+pub mod delivery_profile;
 pub mod discount;
+pub mod giftcard;
 pub mod metaobject;
 pub mod product;
+pub mod store_credit;

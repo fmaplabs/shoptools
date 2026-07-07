@@ -73,6 +73,26 @@ config file:
 `clone --from A --to B` names both stores explicitly, so it always reads them
 from the config file.
 
+## Supported resources
+
+`export` / `import` / `clone` work over these resource names (in a safe clone
+order, dependencies first):
+
+| Name | Notes |
+| --- | --- |
+| `metaobjects` | definitions + entries; references remapped by handle |
+| `customers` | matched across stores by **email**; the foundation for the three below |
+| `products` | handle, options, variants, prices — created via `productSet` |
+| `delivery_profiles` | flat-rate zones; locations remapped by name; default profile skipped |
+| `discounts` | percentage, all-customers; collection scope remapped by handle |
+| `giftcards` | codes can't be read, so imported cards get **fresh codes** |
+| `store_credit` | per-customer balances (current balance only) |
+
+Cross-store references are never carried by id — they're re-resolved against the
+target store by a **stable identifier** (email / handle / location name). The
+Admin API's cost-based rate limit is handled with automatic backoff-and-retry in
+`ShopifyClient::graphql`, so bulk imports ride out throttling.
+
 ## Reading order (to learn the codebase)
 
 `src/lib.rs` (the map) → `src/cli.rs` (the CLI shape) → `src/config.rs` (the
@@ -89,4 +109,11 @@ replace each `todo!()`. Run `cargo build` often; the compiler is your guide.
 
 - Blocking → async (`tokio`) for cloning resources concurrently.
 - CSV export/import alongside JSON.
-- More resources (customers, collections, pages, …).
+- **Orders** — `orderCreate` exists, but orders can't be reproduced faithfully
+  (new ids/numbers, approximate transactions/fulfillments, single discount code,
+  and a 5-orders/min cap on dev stores). Deferred until the volume/fidelity
+  tradeoff is decided; the pieces it needs (customer-by-email + throttle retry)
+  are already in place.
+- More resources (collections, pages, redirects, …). Note: `discounts` already
+  reference collections by handle, so collections must exist in the target until
+  a `collections` resource lands.
