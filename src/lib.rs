@@ -37,17 +37,41 @@ pub fn run() -> Result<()> {
         }
         Command::Export {
             resource,
+            all,
             store,
             out,
+            dir,
             no_bulk,
-        } => commands::export::run(&resource, store.as_deref(), out, no_bulk),
+        } => {
+            if all {
+                commands::export::run_all(store.as_deref(), dir, no_bulk)
+            } else {
+                // clap guarantees `resource` is present when --all is absent.
+                commands::export::run(&resource.unwrap(), store.as_deref(), out, no_bulk)
+            }
+        }
         Command::Import {
             resource,
+            all,
             file,
+            dir,
             store,
             dry_run,
             no_bulk,
-        } => commands::import::run(&resource, &file, store.as_deref(), dry_run, no_bulk),
+        } => {
+            if all {
+                commands::import::run_all(store.as_deref(), dir, dry_run, no_bulk)
+            } else {
+                // clap guarantees `resource` and `file` are present when --all is absent.
+                commands::import::run(
+                    &resource.unwrap(),
+                    &file.unwrap(),
+                    store.as_deref(),
+                    dry_run,
+                    no_bulk,
+                )
+            }
+        }
         Command::Clone {
             from,
             to,

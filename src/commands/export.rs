@@ -27,9 +27,29 @@ pub fn run(
     // Default the output filename to "<resource>.json".
     let path = out.unwrap_or_else(|| PathBuf::from(format!("{}.json", res.name())));
 
-    // TODO(you): write `data` to `path` as pretty JSON, then print a confirmation.
-    let text = serde_json::to_string_pretty(&data)?;
-    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?; // needs anyhow::Context
-    println!("Exported {} to {}", res.name(), path.display());
+    write_json(&data, &path, res.name())
+}
+
+/// Export every known resource type into `dir` (one `<resource>.json` each).
+pub fn run_all(store: Option<&str>, dir: Option<PathBuf>, no_bulk: bool) -> Result<()> {
+    let dir = dir.unwrap_or_else(|| PathBuf::from("shoptools_exports"));
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("creating directory {}", dir.display()))?;
+
+    let cred = config::resolve(store, Role::Source)?;
+    let client = ShopifyClient::new(cred)?;
+
+    for res in resource::all() {
+        let data = res.export(&client, no_bulk)?;
+        let path = dir.join(format!("{}.json", res.name()));
+        write_json(&data, &path, res.name())?;
+    }
+    Ok(())
+}
+
+fn write_json(data: &serde_json::Value, path: &std::path::Path, name: &str) -> Result<()> {
+    let text = serde_json::to_string_pretty(data)?;
+    std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))?;
+    println!("Exported {} to {}", name, path.display());
     Ok(())
 }
