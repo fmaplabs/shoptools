@@ -171,7 +171,7 @@ impl Resource for Metaobject {
         "metaobjects"
     }
 
-    fn export(&self, client: &ShopifyClient) -> Result<Value> {
+    fn export(&self, client: &ShopifyClient, _no_bulk: bool) -> Result<Value> {
         // Phase 1: the definitions (the schema), across all pages.
         let definitions = client.paginate(DEFINITIONS_QUERY, json!({}), "metaobjectDefinitions")?;
 
@@ -198,7 +198,13 @@ impl Resource for Metaobject {
         Ok(json!({ "definitions": Value::Array(definitions), "objects": objects }))
     }
 
-    fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()> {
+    fn import(
+        &self,
+        client: &ShopifyClient,
+        data: &Value,
+        dry_run: bool,
+        _no_bulk: bool,
+    ) -> Result<()> {
         let export: MetaobjectExport = serde_json::from_value(data.clone())
             .context("import data was not a metaobject export ({definitions, objects})")?;
 

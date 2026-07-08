@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::Resource;
+use crate::bulk::{self, ChildSpec};
 use crate::client::ShopifyClient;
 
 pub struct Product;
@@ -93,17 +94,35 @@ mutation SetProduct($input: ProductSetInput!) {
 }
 "#;
 
-/// Follow-up query to page ONE product's variants when the inline `first: 100`
-/// overflows. Keyed by product id (same idiom as `discount.rs`'s collections).
-const PRODUCT_VARIANTS: &str = r#"
-query ProductVariants($id: ID!, $cursor: String) {
-  product(id: $id) {
-    variants(first: 100, after: $cursor) {
-      nodes {
-        sku price compareAtPrice barcode taxable inventoryPolicy
-        selectedOptions { name value }
+/// Bulk export query (validated ✅ 2026-07). `edges { node { … } }` with no
+/// cursors/`pageInfo`; the Bulk Operations API streams *every* product and
+/// variant server-side, so there's no variant cap and no overflow re-fetch. The
+/// `variants` children come back as separate JSONL lines tagged with `__parentId`
+/// and `__typename`, which `bulk::reassemble` nests back under `variants.nodes`.
+const BULK_PRODUCTS: &str = r#"
+query BulkProducts {
+  products {
+    edges {
+      node {
+        id
+        handle
+        title
+        status
+        descriptionHtml
+        productType
+        vendor
+        tags
+        options { name position optionValues { name } }
+        variants {
+          edges {
+            node {
+              __typename
+              id sku price compareAtPrice barcode taxable inventoryPolicy
+              selectedOptions { name value }
+            }
+          }
+        }
       }
-      pageInfo { hasNextPage endCursor }
     }
   }
 }
@@ -114,82 +133,76 @@ impl Resource for Product {
         "products"
     }
 
-    fn export(&self, client: &ShopifyClient) -> Result<Value> {
-        let mut products = client.paginate(
-            r#"
-            query Products($cursor: String) {
-              products(first: 50, after: $cursor) {
-                nodes {
-                  id
-                  handle
-                  title
-                  status
-                  descriptionHtml
-                  productType
-                  vendor
-                  tags
-                  options { name position optionValues { name } }
-                  variants(first: 100) {
-                    nodes {
-                      sku price compareAtPrice barcode taxable inventoryPolicy
-                      selectedOptions { name value }
-                    }
-                    pageInfo { hasNextPage endCursor }
-                  }
-                }
-                pageInfo { hasNextPage endCursor }
-              }
-            }
-            "#,
-            json!({}),
-            "products",
-        )?;
+    fn export(&self, client: &ShopifyClient, no_bulk: bool) -> Result<Value> {
+        if no_bulk {
+            return export_legacy(client);
+        }
 
-        // Nested paging: if a product has more than 100 variants, refetch the
-        // full list by product id and splice it back in.
+        let lines = bulk::bulk_query(client, BULK_PRODUCTS)?;
+        let specs = [ChildSpec {
+            typename: "ProductVariant",
+            field: "variants",
+        }];
+        let mut products = bulk::reassemble(lines, &specs);
+
+        // Guarantee the on-disk shape: a product with no variant lines still
+        // gets `variants: { nodes: [] }` so re-import deserializes cleanly.
         for p in &mut products {
-            let truncated = p["variants"]["pageInfo"]["hasNextPage"].as_bool() == Some(true);
-            if !truncated {
-                continue;
+            if !p["variants"].is_object() {
+                p["variants"] = json!({ "nodes": [] });
             }
-            let id = p["id"]
-                .as_str()
-                .context("product node missing id for variant paging")?
-                .to_string();
-            let all = client.paginate_nested(PRODUCT_VARIANTS, json!({ "id": id }), |d| {
-                d["product"]["variants"].clone()
-            })?;
-            p["variants"] = json!({ "nodes": all });
         }
 
         Ok(Value::Array(products))
     }
 
-    fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()> {
+    fn import(
+        &self,
+        client: &ShopifyClient,
+        data: &Value,
+        dry_run: bool,
+        no_bulk: bool,
+    ) -> Result<()> {
         let products: Vec<ProductRecord> = serde_json::from_value(data.clone())
             .context("import data was not a JSON array of products")?;
 
         println!("{} product(s) to import", products.len());
 
-        for p in &products {
-            let variant_count = p.variants.nodes.len();
-
-            if dry_run {
+        // dry-run: build the inputs and print, but touch no network.
+        if dry_run {
+            for p in &products {
                 println!(
                     "  would create: {} ({}, {} variant(s))",
                     p.handle,
                     p.status.as_deref().unwrap_or("?"),
-                    variant_count
+                    p.variants.nodes.len()
                 );
-                continue;
             }
+            return Ok(());
+        }
 
-            let input = build_product_set_input(p);
-            let result = client.graphql(PRODUCT_SET, json!({ "input": input }))?;
-            let payload = &result["productSet"];
+        if no_bulk {
+            return import_legacy(client, &products);
+        }
+
+        // Bulk import: one `productSet` invocation per JSONL line. Same mutation
+        // string and input builder as the legacy path — only the transport differs.
+        let lines: Vec<Value> = products
+            .iter()
+            .map(|p| json!({ "input": build_product_set_input(p) }))
+            .collect();
+        let mut results = bulk::bulk_mutation(client, PRODUCT_SET, &lines)?;
+
+        // Results may arrive out of order; `__lineNumber` indexes back into the
+        // input file, so sort by it before zipping with the products.
+        results.sort_by_key(|r| r["__lineNumber"].as_u64().unwrap_or(u64::MAX));
+
+        for (p, result) in products.iter().zip(results.iter()) {
+            let variant_count = p.variants.nodes.len();
+            let payload = product_set_payload(result);
 
             // Best-effort per product: a duplicate handle (re-run) or bad data
-            // skips just this product rather than aborting the whole import.
+            // surfaces as a per-line userError skip, not a fatal error.
             if let Some(errors) = payload["userErrors"].as_array()
                 && !errors.is_empty()
             {
@@ -199,6 +212,74 @@ impl Resource for Product {
             println!("  created {} ({} variant(s))", p.handle, variant_count);
         }
         Ok(())
+    }
+}
+
+/// Legacy cursor-paginated export (used with `--no-bulk`). Unlike the bulk path,
+/// a product's `variants` are capped at the inline `first: 100`; the old
+/// per-product overflow re-fetch is gone — reach for bulk if you have >100.
+fn export_legacy(client: &ShopifyClient) -> Result<Value> {
+    let products = client.paginate(
+        r#"
+        query Products($cursor: String) {
+          products(first: 50, after: $cursor) {
+            nodes {
+              id
+              handle
+              title
+              status
+              descriptionHtml
+              productType
+              vendor
+              tags
+              options { name position optionValues { name } }
+              variants(first: 100) {
+                nodes {
+                  sku price compareAtPrice barcode taxable inventoryPolicy
+                  selectedOptions { name value }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+        "#,
+        json!({}),
+        "products",
+    )?;
+
+    Ok(Value::Array(products))
+}
+
+/// Legacy per-record import (used with `--no-bulk`): one `productSet` GraphQL
+/// call per product, best-effort skipping on userErrors.
+fn import_legacy(client: &ShopifyClient, products: &[ProductRecord]) -> Result<()> {
+    for p in products {
+        let variant_count = p.variants.nodes.len();
+        let input = build_product_set_input(p);
+        let result = client.graphql(PRODUCT_SET, json!({ "input": input }))?;
+        let payload = &result["productSet"];
+
+        if let Some(errors) = payload["userErrors"].as_array()
+            && !errors.is_empty()
+        {
+            println!("  skipped {}: {}", p.handle, payload["userErrors"]);
+            continue;
+        }
+        println!("  created {} ({} variant(s))", p.handle, variant_count);
+    }
+    Ok(())
+}
+
+/// Locate the `productSet` payload inside one bulk-mutation result line. Bulk
+/// results wrap each line's mutation output in `data`; fall back to the bare
+/// payload if that wrapper is ever absent.
+fn product_set_payload(result: &Value) -> &Value {
+    if result.get("data").is_some() {
+        &result["data"]["productSet"]
+    } else {
+        &result["productSet"]
     }
 }
 

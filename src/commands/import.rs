@@ -11,7 +11,13 @@ use crate::client::ShopifyClient;
 use crate::config::{self, Role};
 use crate::resource;
 
-pub fn run(resource_name: &str, file: &Path, store: Option<&str>, dry_run: bool) -> Result<()> {
+pub fn run(
+    resource_name: &str,
+    file: &Path,
+    store: Option<&str>,
+    dry_run: bool,
+    no_bulk: bool,
+) -> Result<()> {
     let res = resource::by_name(resource_name)?;
     // Import writes *into* a store: target credentials.
     let cred = config::resolve(store, Role::Target)?;
@@ -20,6 +26,6 @@ pub fn run(resource_name: &str, file: &Path, store: Option<&str>, dry_run: bool)
     let text =
         std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
     let data: serde_json::Value = serde_json::from_str(&text)?;
-    res.import(&client, &data, dry_run)?;
+    res.import(&client, &data, dry_run, no_bulk)?;
     Ok(())
 }

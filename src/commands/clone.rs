@@ -34,9 +34,10 @@ pub fn run(from: &str, to: &str, only: &[String], dry_run: bool) -> Result<()> {
 
     // TODO(you): copy each resource from source to target.
     //
+    // `clone` always uses the default (bulk where available) path.
     for res in &resources {
-        let data = res.export(&from_client)?;
-        res.import(&to_client, &data, dry_run)?;
+        let data = res.export(&from_client, false)?;
+        res.import(&to_client, &data, dry_run, false)?;
         println!("cloned {}", res.name());
     }
     Ok(())

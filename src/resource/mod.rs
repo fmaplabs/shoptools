@@ -17,12 +17,20 @@ pub trait Resource {
     fn name(&self) -> &'static str;
 
     /// Read all of this resource from `client`, returning a JSON array.
-    /// Implementations paginate through the Admin API.
-    fn export(&self, client: &ShopifyClient) -> Result<Value>;
+    /// Uses the Bulk Operations API where supported; `no_bulk` forces the legacy
+    /// cursor-paginated path (always used by metaobjects/delivery_profiles).
+    fn export(&self, client: &ShopifyClient, no_bulk: bool) -> Result<Value>;
 
     /// Write `data` (a JSON array, as produced by `export`) into `client`'s
     /// store. When `dry_run` is true, print what *would* happen and change nothing.
-    fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()>;
+    /// `no_bulk` forces the legacy per-record path over the Bulk Operations API.
+    fn import(
+        &self,
+        client: &ShopifyClient,
+        data: &Value,
+        dry_run: bool,
+        no_bulk: bool,
+    ) -> Result<()>;
 }
 
 /// Look up a single resource implementation by its command-line name.

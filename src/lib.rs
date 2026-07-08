@@ -12,6 +12,7 @@
 //!                 └── commands (the user-facing verbs, tie it all together)
 //!   cli     (argument parsing; depended on by `run` below)
 
+mod bulk;
 mod cli;
 mod client;
 mod commands;
@@ -38,13 +39,15 @@ pub fn run() -> Result<()> {
             resource,
             store,
             out,
-        } => commands::export::run(&resource, store.as_deref(), out),
+            no_bulk,
+        } => commands::export::run(&resource, store.as_deref(), out, no_bulk),
         Command::Import {
             resource,
             file,
             store,
             dry_run,
-        } => commands::import::run(&resource, &file, store.as_deref(), dry_run),
+            no_bulk,
+        } => commands::import::run(&resource, &file, store.as_deref(), dry_run, no_bulk),
         Command::Clone {
             from,
             to,

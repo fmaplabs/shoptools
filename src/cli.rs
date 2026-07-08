@@ -52,6 +52,9 @@ pub enum Command {
         /// Output file (defaults to <resource>.json)
         #[arg(short, long)]
         out: Option<PathBuf>,
+        /// Force the legacy paginated path instead of the Bulk Operations API
+        #[arg(long)]
+        no_bulk: bool,
     },
 
     /// Import a resource into a store from a JSON file
@@ -67,6 +70,9 @@ pub enum Command {
         /// Plan and print changes without writing anything
         #[arg(long)]
         dry_run: bool,
+        /// Force the legacy per-record path instead of the Bulk Operations API
+        #[arg(long)]
+        no_bulk: bool,
     },
 
     /// Clone resources from one store into another

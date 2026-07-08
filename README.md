@@ -91,7 +91,32 @@ order, dependencies first):
 Cross-store references are never carried by id — they're re-resolved against the
 target store by a **stable identifier** (email / handle / location name). The
 Admin API's cost-based rate limit is handled with automatic backoff-and-retry in
-`ShopifyClient::graphql`, so bulk imports ride out throttling.
+`ShopifyClient::graphql`, so paginated requests ride out throttling.
+
+## Bulk Operations
+
+`export` and `import` use Shopify's [Bulk Operations API](https://shopify.dev/docs/api/usage/bulk-operations/queries)
+by default for `products`, `customers`, `discounts`, `giftcards`, and
+`store_credit`: exports run a single `bulkOperationRunQuery` and download the
+resulting JSONL (no pagination, no nested-connection caps, effectively immune
+to rate limiting), and imports upload a JSONL variables file via
+`stagedUploadsCreate` and run one `bulkOperationRunMutation` (per-record errors
+are still reported as skips, so re-runs stay idempotent). The on-disk JSON
+format is unchanged — bulk JSONL is reassembled into the same shape the
+paginated path produces, so old export files import fine and vice versa.
+
+`metaobjects` (per-type queries, ordered definition→entry imports) and
+`delivery_profiles` (nesting exceeds the bulk API's two-level connection limit)
+keep the paginated/per-record path.
+
+Notes:
+- Pass `--no-bulk` to `export`/`import` to force the legacy paginated/per-record
+  path — handy for tiny datasets, since a bulk operation has a fixed
+  submit-poll-download overhead of a few seconds.
+- Shopify runs one bulk query and one bulk mutation per shop at a time; if
+  another operation is already running, shoptools reports the error and exits.
+- Bulk plumbing (submit, poll with backoff, staged upload, JSONL reassembly)
+  lives in `src/bulk.rs`.
 
 ## Reading order (to learn the codebase)
 

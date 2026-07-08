@@ -53,7 +53,7 @@ impl Resource for DeliveryProfile {
         "delivery_profiles"
     }
 
-    fn export(&self, client: &ShopifyClient) -> Result<Value> {
+    fn export(&self, client: &ShopifyClient, _no_bulk: bool) -> Result<Value> {
         let profiles = client.paginate(
             r#"
             query DeliveryProfiles($cursor: String) {
@@ -108,7 +108,13 @@ impl Resource for DeliveryProfile {
         Ok(Value::Array(kept))
     }
 
-    fn import(&self, client: &ShopifyClient, data: &Value, dry_run: bool) -> Result<()> {
+    fn import(
+        &self,
+        client: &ShopifyClient,
+        data: &Value,
+        dry_run: bool,
+        _no_bulk: bool,
+    ) -> Result<()> {
         let profiles = arr(data);
         println!("{} delivery profile(s) to import", profiles.len());
 

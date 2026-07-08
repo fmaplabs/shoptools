@@ -1,5 +1,3 @@
-//! The Shopify Admin GraphQL client. ⭐ YOUR FIRST TASK ⭐
-//!
 //! Implement `ShopifyClient::new` and `ShopifyClient::graphql`. When they work,
 //! `shoptools query '{ shop { name } }'` will make a real Admin API call. Use
 //! `config.rs` as your style reference (Result, `?`, `.context(...)`).
@@ -151,6 +149,32 @@ impl ShopifyClient {
         }
 
         Ok(all)
+    }
+
+    /// The underlying blocking HTTP client, for callers that must talk to a
+    /// non-Shopify endpoint (e.g. the pre-signed staged-upload target for bulk
+    /// operations). Requests made through this bypass the GraphQL/throttle logic
+    /// above and carry no `X-Shopify-Access-Token` header unless the caller adds
+    /// one. Keep this narrow — `graphql` is the right entry point for the Admin API.
+    pub fn http(&self) -> &reqwest::blocking::Client {
+        &self.http
+    }
+
+    /// Download `url` with a plain unauthenticated GET and return the body as text.
+    ///
+    /// Bulk-operation result files live at pre-signed URLs that already encode
+    /// their own authorization, and Shopify's storage rejects the
+    /// `X-Shopify-Access-Token` header — so this deliberately sends no auth.
+    pub fn download(&self, url: &str) -> Result<String> {
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .context("downloading bulk-operation result file")?;
+        let resp = resp
+            .error_for_status()
+            .context("bulk-operation result download returned an error status")?;
+        resp.text().context("reading bulk-operation result body")
     }
 
     /// Resolve a product HANDLE to this store's product id (null → error).
